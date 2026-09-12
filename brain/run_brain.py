@@ -66,10 +66,14 @@ REST_ANGLE = 90
 # --- neural activity -> servo readout --------------------------------------
 # These are actuator/readout choices, not biological parameters. The circuit
 # and its neuron parameters are unchanged. There is no flight-duration timer.
-RATE_TAU_S = 0.5            # exponential smoothing of motor spikes (flight memory)
-RATE_FULL_HZ = 100.0        # per motor neuron: full amplitude/frequency
+RATE_TAU_S = 0.8            # exponential smoothing of motor spikes (flight memory)
+RATE_FULL_HZ = 60.0        # per motor neuron: full amplitude/frequency
 RATE_ON_HZ = 5.0            # hysteresis avoids toggling near silence
 RATE_OFF_HZ = 2.0
+CAPTURE_S = 0.25            # sensor stays live for this long after take-off:
+                            # the servo is still near rest, so the network's
+                            # whole response is captured before the input is
+                            # gated against the flap noise
 LAND_REFRACTORY = 0.5       # ignore sensor noise briefly AFTER activity ends
 FLAP_MIN_HZ = 0.6
 FLAP_MAX_HZ = 1.2
@@ -153,12 +157,22 @@ class FlightBehavior:
         self.flying = False
         self.phase = 0.0
         self.angle = float(REST_ANGLE)
+        self.capture_until = -1.0
         self.refractory_until = -1.0
         self.episodes = 0
 
     def input_blocked(self, now: float) -> bool:
-        """Guard landing noise; keep sensing continuously during flight."""
-        return now < self.refractory_until
+        """Ignore the sensor once the wings are moving (and just after landing).
+
+        On the bench the moving SG90 injects electrical noise into the analog
+        input, and those per-sample jumps are LARGER than the real light signal,
+        so no velocity filter can separate them. The input therefore stays live
+        only for CAPTURE_S after take-off -- while the servo is still near rest
+        -- so the network's whole response is measured before the gate closes.
+        Flight duration is still decided by the network: it is how long the
+        captured spike rate takes to decay below the off-threshold.
+        """
+        return (self.flying and now >= self.capture_until) or now < self.refractory_until
 
     def update(self, now: float, dt: float, mspikes: int) -> int:
         rate = mspikes / (self.motor_neurons * dt)
@@ -173,14 +187,15 @@ class FlightBehavior:
             self.flying = True
             self.phase = 0.0
             self.drive = 0.0
+            self.capture_until = now + CAPTURE_S
             self.episodes += 1
 
         target = float(REST_ANGLE)
         self.frequency_hz = 0.0
         if self.flying:
-            # The PEAK of the response latches the flap strength for the whole
-            # episode; the rate's decay sets how long the fly stays airborne.
-            # A bigger burst => bigger wings AND a longer flight.
+            # The PEAK of the captured response latches the flap strength for the
+            # whole episode; the rate's decay sets how long the fly stays
+            # airborne. A bigger burst => bigger wings AND a longer flight.
             self.drive = max(self.drive, min(self.rate_hz / RATE_FULL_HZ, 1.0))
             self.frequency_hz = FLAP_MIN_HZ + (FLAP_MAX_HZ - FLAP_MIN_HZ) * self.drive
             self.phase = (self.phase + 2.0 * math.pi * self.frequency_hz * dt) % (2.0 * math.pi)
@@ -437,7 +452,7 @@ def port_loop(port: str, baud: int, seconds: float, sensor: str = "pot") -> int:
                 ser,
                 1 if counts[sens].any() else 0,
                 1 if counts[inter].any() else 0,
-                1 if mspikes else 0,
+                1 if (mspikes or fly.flying) else 0,
                 angle,
             )
 

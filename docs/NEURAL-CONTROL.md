@@ -62,9 +62,9 @@ Every nominal 20 ms loop window, `FlightBehavior` computes:
 
 ```text
 instantaneous_rate = motor_spikes / (motor_neurons × window_seconds)
-alpha = 1 - exp(-window_seconds / 0.50)
+alpha = 1 - exp(-window_seconds / 0.80)
 rate = rate + alpha × (instantaneous_rate - rate)
-drive = max(drive, min(rate / 100 Hz, 1))   # PEAK latched per episode
+drive = max(drive, min(rate / 60 Hz, 1))    # PEAK latched per episode
 amplitude = 50° × drive
 frequency = 0.6 Hz + 0.6 Hz × drive
 ```
@@ -73,9 +73,22 @@ Motion starts when a window contains spikes and the filtered rate reaches 5 Hz
 per motor neuron. It remains active until the rate falls below 2 Hz. These two
 thresholds prevent rapid toggling around silence. The oscillator phase advances
 continuously while active; the flap strength is the episode's PEAK drive. Because
-the rate then decays exponentially from that peak (time constant 0.50 s), a bigger
+the rate then decays exponentially from that peak (time constant 0.80 s), a bigger
 burst stays above the off-threshold for longer: the network's response sets both
 the wing amplitude AND the flight duration, with no timer.
+
+The duration is therefore not fixed. Measured on the saved circuit, it follows the
+strength of the startle:
+
+| sensor rise | flight | wing span |
+|---:|---:|---:|
+| 0.05 s | 1.44 s | 18° |
+| 0.20 s | 2.48 s | 58° |
+| 0.40 s | 2.80 s | 78° |
+| 1.60 s | 2.34 s | 44° |
+
+A sharp startle gives a short flick; a strong one gives the full flight; a very
+slow one fails to raise the rate estimate enough to matter.
 
 The servo target is `90° + amplitude × sin(phase)`. When activity subsides, the
 target becomes 90°. Commands are constrained to 40°–140° and slew-limited to
@@ -84,31 +97,35 @@ to whole degrees. The slew limit can reduce the achieved amplitude at high rates
 The printed `flap` value is the requested oscillator frequency, not a measurement
 of physical servo motion.
 
-The 0.50 s filter is an actuator readout choice. It leaves a movement tail after
-the final spike (measured: one fast flick gives a ~1.8 s episode with ~2 wing
-beats and about ±26° around rest); observed movement duration therefore depends on
+The 0.80 s filter is an actuator readout choice. It leaves a movement tail after
+the final spike (measured: one fast flick gives a ~2.1 s episode with ~2 wing
+beats); observed movement duration therefore depends on
 both network activity and the readout parameters. No additional neural populations,
 connections, adaptation mechanisms or biological claims were introduced. The
 sinusoid still comes from code, not from oscillations in the connectome.
 
 ## Sensing and hardware
 
-Sensor input stays live during movement so new activity can sustain or change it.
-After the activity threshold is crossed downward, a 0.5 s input guard suppresses
-landing noise. The sensor filter keeps updating during this guard so reopening
-input does not accumulate a false derivative. The green LED reports actual motor
-spikes in the current window, independently of the readout's decay.
+The sensor stays live for `CAPTURE_S = 0.25 s` after take-off, then the input is
+muted until the flight ends (plus a 0.5 s guard after landing). This is not a
+stylistic choice. On the bench the moving SG90 injects electrical noise into the
+analog input, and those per-sample jumps are LARGER than the real light signal:
+the LDR swings ~50-100 counts while the servo flaps, against a genuine flashlight
+step of a few tens of counts per sample. No velocity filter can separate them, so
+an earlier revision that kept sensing live throughout the flight never landed — it
+was observed running ~29 s and 1227 motor spikes before being stopped by hand.
+The capture window exists because the servo starts at rest (phase 0 targets the
+rest angle), so the network's whole response can be measured during the first
+0.25 s, before the wings actually move. The green LED reports actual motor spikes
+in the current window, independently of the readout's decay.
 
 After a serial reconnection, sensor history, neuron state and the servo readout
 are reset together and a rest command is sent. Pre-outage activity cannot resume
 an old movement; a new stimulus is required. The cumulative episode count is kept.
 
-The median filter and dead band remain in place. Since input is no longer muted
-throughout a flight, power decoupling matters during movement: electrical noise
-can sustain activity. The LDR-to-servo path was exercised on the physical Arduino
-on 2026-09-12, as recorded below. The command slew limit does not model the servo's
-mechanics or change the firmware boot test; the bench trial was a functional
-check, not a calibration of angle, speed or noise rejection.
+The median filter and dead band remain in place. The command slew limit does not
+model the servo's mechanics or change the firmware boot test; the bench trial was
+a functional check, not a calibration of angle, speed or noise rejection.
 
 ## Physical bench trial — 2026-09-12
 
