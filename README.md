@@ -5,15 +5,16 @@ controlling physical hardware.**
 
 I took the public [FlyWire](https://flywire.ai) connectome — the synapse-by-synapse map of the
 fly brain — extracted the subcircuit that detects "something approaching" and triggers escape, and
-wired it into an Arduino. When you startle the fly, it takes off and flies for a while
-**decided by the connections themselves**, then lands and stops. The servo only moves when the
-*Giant Fiber* (DNp01) actually fires — the behaviour **emerges from the wiring**, not from `if`s.
+wired it into an Arduino. Activity in the *Giant Fiber* (DNp01) continuously controls
+the amplitude and frequency of a servo oscillation. When that activity fades,
+the servo returns to rest. The connections drive the neural response; a short
+rate filter and an engineered oscillator translate it into physical movement.
 
 > **TL;DR:** A real fruit-fly connectome (FlyWire FAFB v783) reduced to a 583-neuron
 > looming→escape subcircuit, simulated with a sparse LIF model on a laptop CPU (~0.9× real
 > time) and closed into a physical loop via an Arduino: potentiometer = looming sense, three
-> LEDs = the three neural stages, servo = flapping wings. Escape/flight behaviour emerges from
-> the actual wiring, not from scripted logic.
+> LEDs = the three neural stages, servo = flapping wings. Recent motor firing
+> controls the movement continuously, with no predetermined flight duration.
 
 ---
 
@@ -29,7 +30,7 @@ wired it into an Arduino. When you startle the fly, it takes off and flies for a
 ```
 
 - The **Arduino is the body**: it reads sensors, moves the servo, lights LEDs. Deliberately dumb.
-- The **laptop is the brain**: it runs the connectome and decides. The neurons are the ones deciding.
+- The **laptop is the brain**: it simulates the connectome and maps motor activity to servo commands.
 - The loop closes at ~50 Hz over USB serial.
 
 The potentiometer lets you "startle" the fly: a slow ramp is ignored, a sharp turn
@@ -47,26 +48,42 @@ The subcircuit is extracted by `brain/build_circuit.py`:
 | **Sensory** | 314 | LC4 + LPLC2 — visual *looming* detectors |
 | **Interneurons** | 267 | what connects the two |
 | **Motor** | 2 | DNp01 — the *Giant Fiber*, escape command |
-| **Total** | **583** | 4,799 synapses |
+| **Total** | **583** | 4,799 weighted connections between neuron pairs |
 
 Simulation: sparse LIF in numpy/scipy (`brain/lif.py`), `dt = 0.1 ms`, `tau_m = 20 ms`,
 `tau_syn = 5 ms`. Weights = synapse count, with sign by neurotransmitter
 (GABA = inhibitory). Runs at **~0.9 s of CPU per 1 s of brain** on an i5-1135G7 — that is,
 practically real time, with no GPU.
 
-> The reflex threshold **is not chosen**: it is a consequence of the wiring. In `--dry-run`,
+> The response depends on both the wiring and the chosen model parameters. In `--dry-run`,
 > `stim = 0` → the motor stays quiet; `stim = 0.2` → it fires.
 
 ## The behaviour
 
-The servo does not blink: it **flies**. `brain/run_brain.py` has a state machine:
+`FlightBehavior` in `brain/run_brain.py` continuously reads motor spikes:
 
-1. **Landed** — servo at rest, it ignores the pot.
-2. **Startle** (DNp01 fires) → **takes off**: the servo flaps its wings (oscillates 40°–140°).
-3. The flight duration is decided *at the moment of the startle*:
-   `base + spike_weight × spikes + looming_weight × intensity`, with a bit of random
-   variation. A stronger startle ⇒ a longer flight.
-4. **Lands** and stops. Only a **new** startle makes it fly again.
+1. Estimate the mean DNp01 firing rate with a **100 ms exponential filter**.
+2. Use that rate to set oscillation amplitude (up to ±50° around 90°) and
+   frequency (0.7–2 Hz while active), with a command speed limit of 300°/s.
+3. Keep sensing during movement: new activity can strengthen or sustain it.
+4. As the rate falls below the readout threshold, return to 90°. Ignore sensor
+   input for 0.5 s after this transition to reduce landing noise.
+
+There is **no random duration or flight timer**. Brief stimuli now produce brief
+movements: this circuit did not sustain seconds of motor firing after a short
+pulse. The smoothing, activity thresholds and sinusoid remain engineered choices;
+the oscillation itself does not emerge from the neural network. The green LED
+reports motor spikes in the current window, so it can go dark while the smoothed
+servo output is still returning to rest.
+
+Measurements, the readout equations and reproduction commands are in
+[`docs/NEURAL-CONTROL.md`](docs/NEURAL-CONTROL.md).
+
+The LDR-to-servo path was tested on the physical Arduino on **2026-09-12**.
+After observing the brief movements, the operator chose to preserve the current
+neural response rather than extend it in the servo controller. The
+[bench record and decision](docs/NEURAL-CONTROL.md#physical-bench-trial--2026-09-12)
+include the results and the limits of that functional check.
 
 ### Two ways to startle it
 
@@ -117,8 +134,9 @@ capacitors help:
 - **100 µF** (electrolytic, mind the polarity) between **5 V and GND** near the servo — current
   reserve for the peaks.
 
-In addition, the *software* has a median filter, a dead band and a refractory period after each
-escape, which break the noise → firing → servo → noise cycle.
+In addition, the Python controller has a median filter, a dead band and a brief
+input guard after motor activity subsides. Input remains live during movement,
+so physical filtering is still needed to avoid servo noise sustaining activity.
 
 ## How to run
 
@@ -174,6 +192,17 @@ cd brain && sg dialout -c '../.venv/bin/python -u run_brain.py --port /dev/ttyAC
 
 `--seconds 0` runs until you press Ctrl-C.
 
+## Verification
+
+```bash
+.venv/bin/python -B -m unittest discover -s tests -v
+```
+
+The 12 tests cover the continuous readout, the real saved neural circuit, both
+sensor filters, synthetic and simulated serial operation, and reset after a
+serial reconnection. Test details and pulse-response reproduction commands are
+in [`docs/NEURAL-CONTROL.md`](docs/NEURAL-CONTROL.md).
+
 ## Engineering notes (what broke along the way)
 
 Worth recording, because it was the most interesting part:
@@ -184,8 +213,8 @@ Worth recording, because it was the most interesting part:
 - **`dt ≈ 0` with a full buffer**: processing several delayed samples with the same clock made
   `d(pot)/dt` explode and the noise turn into "looming". Solution: process only the most recent sample
   and use the nominal `dt` (20 ms).
-- **Renewable flinch**: each spike renewed the flinch, so any jitter turned into the servo
-  throbbing. Solution: one event = one behaviour.
+- **Renewable flinch**: timer extensions once made jitter prolong movement. The
+  current readout uses a continuously filtered motor rate instead of renewing a timer.
 - **Noise cycle**: noise fires → servo moves → servo injects noise → fires again.
   Solution: refractory period + capacitors.
 - **The SG90 is positional**: it does not spin 360°, it only goes from 0 to 180° and holds. That is not a bug.
@@ -193,11 +222,13 @@ Worth recording, because it was the most interesting part:
 ## What is real and what is simplified
 
 **Real:** the topology of the connections (who connects to whom, with how many synapses) and the
-identity of the neurons (LC4, LPLC2, DNp01) come from the connectome. The firing threshold emerges from that wiring.
+identity of the neurons (LC4, LPLC2, DNp01) come from the connectome. Neural activity
+depends on that wiring and the configured LIF parameters.
 
 **Simplified:** the neuron model is LIF (not biophysical); synapses are static; the
 neurotransmitters are treated as excitatory (GABA inhibitory); no plasticity; the body
-is a servo, not real biomechanics. It is a serious *toy*, not a paper.
+is a servo, not real biomechanics. The rate filter, servo oscillator, thresholds
+and movement limits are engineered mappings. It is a serious *toy*, not a paper.
 
 ## License and attribution
 

@@ -246,9 +246,12 @@ even reset the board.
   rebooting (the boot self-test repeats, the serial link drops), first suspect
   the servo stalling the 5 V rail, then a wiring short. Unplug the servo, retest,
   and add the 100 µF. Check the rails for a dead short with a multimeter.
-- The firmware adds a **software** guard too: a median filter, a dead band, and
-  a refractory period after each escape break the
-  noise → false firing → servo moves → more noise cycle.
+- The Python controller adds a median filter, a dead band, and a 0.5 s input
+  guard after motor activity subsides. Sensing remains live during movement,
+  so capacitors and stable power still matter: servo noise can otherwise
+  sustain neural activity. The LDR path passed a functional bench trial on
+  2026-09-12; that trial did not quantify noise rejection. See the
+  [bench record](NEURAL-CONTROL.md#physical-bench-trial--2026-09-12).
 
 ---
 
@@ -382,8 +385,11 @@ band, and post-escape refractory period (see `SENSORS` and `LoomingFilter` in
   cd brain && sg dialout -c '../.venv/bin/python -u run_brain.py --port /dev/ttyACM0 --sensor ldr --seconds 0'
   ```
 
-In both modes a stronger startle produces a longer flight, decided at the moment
-the Giant Fiber (DNp01) fires.
+In both modes recent Giant Fiber (DNp01) activity continuously sets servo amplitude
+and frequency. Movement fades as the firing-rate estimate decays, with no fixed or
+random flight duration. Short stimuli can produce only brief movements. The green
+LED shows current motor spikes, independently of the servo's smoothed return to
+rest. See [the neural control notes](NEURAL-CONTROL.md) for measurements and limits.
 
 ---
 
