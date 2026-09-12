@@ -7,9 +7,11 @@ Reads the Codex data in brain/data/ and reports:
   - the strongest inputs to DNp01 (with cell type).
 """
 
+import os
+
 import pandas as pd
 
-DATA = "/home/mhs/mosca/brain/data"
+DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
 
 def main() -> None:

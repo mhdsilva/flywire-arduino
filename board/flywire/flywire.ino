@@ -1,5 +1,5 @@
 /*
- * mosca_test.ino -- Bench test for the "Visible Reflex" project
+ * flywire.ino -- Bench test for the FlyWire-on-Arduino project
  *
  * Goal: prove that EVERY component of the Eletrogate Kit Start works,
  * BEFORE involving any neuroscience. The brain comes later; here the goal
@@ -87,7 +87,7 @@ void setup() {
 
   selfTest();
 
-  Serial.println("# mosca_test ready -- S <ldr> <ntc> <pot> <btn>");
+  Serial.println("# flywire ready -- S <ldr> <ntc> <pot> <btn>");
 }
 
 void loop() {

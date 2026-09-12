@@ -1,4 +1,4 @@
-# Mosca 🪰 — a fly brain driving an Arduino
+# FlyWire on Arduino 🪰 — a fly brain driving an Arduino
 
 **A real *Drosophila melanogaster* brain circuit running on a laptop CPU and
 controlling physical hardware.**
@@ -84,7 +84,7 @@ Eletrogate "Kit Start" kit (Arduino UNO R3):
 | Button | 2 | *(optional)* |
 | Buzzer | 8 | *(optional)* |
 
-Assembly and wiring details are in the header of `board/mosca_test/mosca_test.ino`.
+Assembly and wiring details are in the header of `board/flywire/flywire.ino`.
 
 ### Noise protection (bench learning)
 
@@ -130,7 +130,7 @@ sudo usermod -a -G dialout "$USER"
 ### 3. Flash the Arduino
 
 ```bash
-arduino-cli compile --fqbn arduino:avr:uno --upload -p /dev/ttyACM0 board/mosca_test
+arduino-cli compile --fqbn arduino:avr:uno --upload -p /dev/ttyACM0 board/flywire
 ```
 
 On boot it runs a self-test: sweeps the servo, lights the LEDs in sequence, beeps the buzzer

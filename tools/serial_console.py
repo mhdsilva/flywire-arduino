@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serial console for the "mosca" bench test.
+"""Serial console for the FlyWire-on-Arduino bench test.
 
 Reads the sensors the Uno transmits and (optionally) commands servo/LEDs.
 
