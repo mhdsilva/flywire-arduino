@@ -1,0 +1,17 @@
+# python environment
+.venv/
+__pycache__/
+*.pyc
+
+# local binaries (arduino-cli downloaded into bin/)
+bin/
+
+# raw FlyWire data is large (~50 MB) and has its own license.
+# Use brain/fetch_data.py to download it. The derived circuit.npz (24 KB) is
+# versioned so anyone can run the brain without downloading 50 MB.
+brain/data/*.csv.gz
+brain/data/*.feather
+brain/data/*.npy
+
+# system
+.DS_Store
