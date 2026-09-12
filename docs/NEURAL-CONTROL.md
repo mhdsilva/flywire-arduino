@@ -69,26 +69,25 @@ amplitude = 50° × drive
 frequency = 0.6 Hz + 0.6 Hz × drive
 ```
 
-Motion starts when a window contains spikes and the filtered rate reaches 5 Hz
-per motor neuron. It remains active until the rate falls below 2 Hz. These two
+Motion starts when a window contains spikes and the filtered rate reaches 2 Hz
+per motor neuron. It remains active until the rate falls below 0.8 Hz. These two
 thresholds prevent rapid toggling around silence. The oscillator phase advances
 continuously while active; the flap strength is the episode's PEAK drive. Because
 the rate then decays exponentially from that peak (time constant 0.80 s), a bigger
 burst stays above the off-threshold for longer: the network's response sets both
 the wing amplitude AND the flight duration, with no timer.
 
-The duration is therefore not fixed. Measured on the saved circuit, it follows the
-strength of the startle:
+The duration is therefore not fixed, and the trigger is deliberately sensitive.
+Measured with the LDR sensor config:
 
-| sensor rise | flight | wing span |
+| flashlight rise | flight | wing span |
 |---:|---:|---:|
-| 0.05 s | 1.44 s | 18° |
-| 0.20 s | 2.48 s | 58° |
-| 0.40 s | 2.80 s | 78° |
-| 1.60 s | 2.34 s | 44° |
+| 0.20 s | 3.24 s | 58° |
+| 1.00 s | 3.34 s | 62° |
+| 2.00 s | 1.22 s | 4° |
+| 3.00 s | no flight | — |
 
-A sharp startle gives a short flick; a strong one gives the full flight; a very
-slow one fails to raise the rate estimate enough to matter.
+A gentle approach (up to ~2 s) already startles it; below that it barely registers.
 
 The servo target is `90° + amplitude × sin(phase)`. When activity subsides, the
 target becomes 90°. Commands are constrained to 40°–140° and slew-limited to

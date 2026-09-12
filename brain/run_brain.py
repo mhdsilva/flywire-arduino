@@ -68,8 +68,8 @@ REST_ANGLE = 90
 # and its neuron parameters are unchanged. There is no flight-duration timer.
 RATE_TAU_S = 0.8            # exponential smoothing of motor spikes (flight memory)
 RATE_FULL_HZ = 60.0        # per motor neuron: full amplitude/frequency
-RATE_ON_HZ = 5.0            # hysteresis avoids toggling near silence
-RATE_OFF_HZ = 2.0
+RATE_ON_HZ = 2.0            # trigger as soon as a real burst appears
+RATE_OFF_HZ = 0.8           # hysteresis avoids toggling near silence
 CAPTURE_S = 0.25            # sensor stays live for this long after take-off:
                             # the servo is still near rest, so the network's
                             # whole response is captured before the input is
@@ -85,7 +85,7 @@ SERVO_SPEED_DPS = 450.0     # command slew limit, including return to rest
 # The looming stimulus can come from the potentiometer or the LDR (light).
 # Each entry: which field of the "S <ldr> <ntc> <pot> <btn>" line to read,
 # which direction means "approaching", and the weight of the absolute level.
-LDR_DEAD = 500.0  # counts/s: higher than the pot, to reject dark-noise jitter
+LDR_DEAD = 250.0  # counts/s: smaller than the pot's, the LDR step is gentler
 SENSORS = {
     "pot": {"field": 3, "direction": 1.0, "level_w": LEVEL_W, "dead": V_DEAD},
     "ldr": {"field": 1, "direction": 1.0, "level_w": 0.0, "dead": LDR_DEAD},

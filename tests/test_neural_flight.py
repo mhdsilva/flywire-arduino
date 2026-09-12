@@ -190,7 +190,7 @@ class CircuitReadoutTests(unittest.TestCase):
                 fly = FlightBehavior(int((roles == "motor").sum()))
                 ext = np.zeros(net.n)
                 angles, counts, stimuli = [], [], []
-                for i in range(170):
+                for i in range(260):
                     now = i * 0.02
                     # Rest, then a 200 ms rise, then hold steady.
                     raw = 0 if i < 10 else min(900, (i - 10) * 90)
