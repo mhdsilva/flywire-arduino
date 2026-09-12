@@ -66,16 +66,16 @@ REST_ANGLE = 90
 # --- neural activity -> servo readout --------------------------------------
 # These are actuator/readout choices, not biological parameters. The circuit
 # and its neuron parameters are unchanged. There is no flight-duration timer.
-RATE_TAU_S = 0.10           # short exponential smoothing of motor spikes
+RATE_TAU_S = 0.5            # exponential smoothing of motor spikes (flight memory)
 RATE_FULL_HZ = 100.0        # per motor neuron: full amplitude/frequency
 RATE_ON_HZ = 5.0            # hysteresis avoids toggling near silence
 RATE_OFF_HZ = 2.0
 LAND_REFRACTORY = 0.5       # ignore sensor noise briefly AFTER activity ends
-FLAP_MIN_HZ = 0.7
-FLAP_MAX_HZ = 2.0
+FLAP_MIN_HZ = 0.6
+FLAP_MAX_HZ = 1.2
 FLAP_LO = 40
 FLAP_HI = 140
-SERVO_SPEED_DPS = 300.0     # command slew limit, including return to rest
+SERVO_SPEED_DPS = 450.0     # command slew limit, including return to rest
 
 # --- sensor selection -----------------------------------------------------
 # The looming stimulus can come from the potentiometer or the LDR (light).
@@ -148,6 +148,7 @@ class FlightBehavior:
     def __init__(self, motor_neurons: int = 2) -> None:
         self.motor_neurons = motor_neurons
         self.rate_hz = 0.0
+        self.drive = 0.0
         self.frequency_hz = 0.0
         self.flying = False
         self.phase = 0.0
@@ -171,15 +172,19 @@ class FlightBehavior:
               and mspikes and self.rate_hz >= RATE_ON_HZ):
             self.flying = True
             self.phase = 0.0
+            self.drive = 0.0
             self.episodes += 1
 
         target = float(REST_ANGLE)
         self.frequency_hz = 0.0
         if self.flying:
-            drive = min(self.rate_hz / RATE_FULL_HZ, 1.0)
-            self.frequency_hz = FLAP_MIN_HZ + (FLAP_MAX_HZ - FLAP_MIN_HZ) * drive
+            # The PEAK of the response latches the flap strength for the whole
+            # episode; the rate's decay sets how long the fly stays airborne.
+            # A bigger burst => bigger wings AND a longer flight.
+            self.drive = max(self.drive, min(self.rate_hz / RATE_FULL_HZ, 1.0))
+            self.frequency_hz = FLAP_MIN_HZ + (FLAP_MAX_HZ - FLAP_MIN_HZ) * self.drive
             self.phase = (self.phase + 2.0 * math.pi * self.frequency_hz * dt) % (2.0 * math.pi)
-            amplitude = 0.5 * (FLAP_HI - FLAP_LO) * drive
+            amplitude = 0.5 * (FLAP_HI - FLAP_LO) * self.drive
             target += amplitude * math.sin(self.phase)
 
         travel = SERVO_SPEED_DPS * dt

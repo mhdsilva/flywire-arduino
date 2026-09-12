@@ -14,8 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "brain"))
 
 from lif import LIF
 from run_brain import (
-    DT, STIM_GAIN, WEIGHT_SCALE, FlightBehavior, LoomingFilter, SENSORS,
-    fake, load_circuit, port_loop, step_ms,
+    DT, STIM_GAIN, WEIGHT_SCALE, SERVO_SPEED_DPS, FlightBehavior, LoomingFilter,
+    SENSORS, fake, load_circuit, port_loop, step_ms,
 )
 
 
@@ -66,10 +66,10 @@ class NeuralFlightTests(unittest.TestCase):
         self.assertGreater(max(angles[-50:]) - min(angles[-50:]), 20)
         self.assertEqual(fly.episodes, 1)
 
-    def test_silence_ends_motion_promptly_after_sustained_activity(self):
+    def test_silence_ends_motion_after_the_rate_decays(self):
         fly = FlightBehavior()
         drive(fly, [4] * 25)
-        angles = drive(fly, [0] * 30, start=0.5)
+        angles = drive(fly, [0] * 200, start=0.5)
         self.assertFalse(fly.flying)
         self.assertEqual(angles[-1], 90)
 
@@ -89,19 +89,23 @@ class NeuralFlightTests(unittest.TestCase):
                          drive(FlightBehavior(), train))
 
     def test_angle_and_speed_are_limited_including_return_to_rest(self):
-        angles = [90] + drive(FlightBehavior(), [20] * 100 + [0] * 100)
+        angles = [90] + drive(FlightBehavior(), [20] * 100 + [0] * 200)
         self.assertTrue(all(40 <= a <= 140 for a in angles))
-        self.assertTrue(all(abs(b - a) <= 6 for a, b in zip(angles, angles[1:])))
+        step_max = SERVO_SPEED_DPS * 0.02 + 1
+        self.assertTrue(all(abs(b - a) <= step_max for a, b in zip(angles, angles[1:])))
         self.assertEqual(angles[-1], 90)
 
     def test_sensor_remains_available_while_motor_activity_continues(self):
         fly = FlightBehavior()
-        drive(fly, [4] * 50)
+        drive(fly, [4] * 50)                 # activity while sensing stays live
         self.assertFalse(fly.input_blocked(1.0))
-        drive(fly, [0] * 25, start=1.0)
+        t = 1.0
+        while fly.flying and t < 8.0:        # let the rate decay below the off threshold
+            fly.update(t, 0.02, 0)
+            t += 0.02
         self.assertFalse(fly.flying)
-        self.assertTrue(fly.input_blocked(1.5))
-        self.assertFalse(fly.input_blocked(2.0))
+        self.assertTrue(fly.input_blocked(t + 0.1))    # guard just after landing
+        self.assertFalse(fly.input_blocked(t + 0.6))   # guard expires
 
     def test_rate_estimate_uses_time_and_motor_population_size(self):
         # Same 50 Hz/neuron with different windows and population sizes.
@@ -157,7 +161,8 @@ class CircuitReadoutTests(unittest.TestCase):
                                     for c in board.commands))
                 angles = [90] + [int(c[4]) for c in board.commands]
                 self.assertTrue(all(40 <= a <= 140 for a in angles))
-                self.assertTrue(all(abs(b - a) <= 6 for a, b in zip(angles, angles[1:])))
+                step_max = SERVO_SPEED_DPS * 0.02 + 1
+                self.assertTrue(all(abs(b - a) <= step_max for a, b in zip(angles, angles[1:])))
 
     def test_fake_loop_keeps_receiving_stimulus_during_motion(self):
         # Muting the sensor for an entire flight truncates this response to
@@ -182,7 +187,7 @@ class CircuitReadoutTests(unittest.TestCase):
                 fly = FlightBehavior(int((roles == "motor").sum()))
                 ext = np.zeros(net.n)
                 angles, counts, stimuli = [], [], []
-                for i in range(100):
+                for i in range(170):
                     now = i * 0.02
                     # Rest, then a 200 ms rise, then hold steady.
                     raw = 0 if i < 10 else min(900, (i - 10) * 90)

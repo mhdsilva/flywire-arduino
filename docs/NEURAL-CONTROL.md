@@ -62,29 +62,32 @@ Every nominal 20 ms loop window, `FlightBehavior` computes:
 
 ```text
 instantaneous_rate = motor_spikes / (motor_neurons × window_seconds)
-alpha = 1 - exp(-window_seconds / 0.10)
+alpha = 1 - exp(-window_seconds / 0.50)
 rate = rate + alpha × (instantaneous_rate - rate)
-drive = min(rate / 100 Hz, 1)
+drive = max(drive, min(rate / 100 Hz, 1))   # PEAK latched per episode
 amplitude = 50° × drive
-frequency = 0.7 Hz + 1.3 Hz × drive
+frequency = 0.6 Hz + 0.6 Hz × drive
 ```
 
 Motion starts when a window contains spikes and the filtered rate reaches 5 Hz
 per motor neuron. It remains active until the rate falls below 2 Hz. These two
 thresholds prevent rapid toggling around silence. The oscillator phase advances
-continuously while active; amplitude and frequency are updated every window.
-Sustained spikes can sustain the same episode without a duration cap or restart.
+continuously while active; the flap strength is the episode's PEAK drive. Because
+the rate then decays exponentially from that peak (time constant 0.50 s), a bigger
+burst stays above the off-threshold for longer: the network's response sets both
+the wing amplitude AND the flight duration, with no timer.
 
 The servo target is `90° + amplitude × sin(phase)`. When activity subsides, the
 target becomes 90°. Commands are constrained to 40°–140° and slew-limited to
-300°/s in simulation time, including the return to rest. Serial angles are rounded
+450°/s in simulation time, including the return to rest. Serial angles are rounded
 to whole degrees. The slew limit can reduce the achieved amplitude at high rates.
 The printed `flap` value is the requested oscillator frequency, not a measurement
 of physical servo motion.
 
-The 100 ms filter is an actuator readout choice. It can leave a short movement
-tail after the final spike; observed movement duration therefore depends on both
-network activity and the readout parameters. No additional neural populations,
+The 0.50 s filter is an actuator readout choice. It leaves a movement tail after
+the final spike (measured: one fast flick gives a ~1.8 s episode with ~2 wing
+beats and about ±26° around rest); observed movement duration therefore depends on
+both network activity and the readout parameters. No additional neural populations,
 connections, adaptation mechanisms or biological claims were introduced. The
 sinusoid still comes from code, not from oscillations in the connectome.
 
