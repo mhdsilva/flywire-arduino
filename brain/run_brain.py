@@ -79,6 +79,16 @@ FLAP_HZ = 2.0                 # servo "wing beat" (SG90 is slow)
 FLAP_LO = 40
 FLAP_HI = 140
 
+# --- sensor selection -----------------------------------------------------
+# The looming stimulus can come from the potentiometer or the LDR (light).
+# Each entry: which field of the "S <ldr> <ntc> <pot> <btn>" line to read,
+# which direction means "approaching", and the weight of the absolute level.
+LDR_DEAD = 500.0  # counts/s: higher than the pot, to reject dark-noise jitter
+SENSORS = {
+    "pot": {"field": 3, "direction": 1.0, "level_w": LEVEL_W, "dead": V_DEAD},
+    "ldr": {"field": 1, "direction": 1.0, "level_w": 0.0, "dead": LDR_DEAD},
+}
+
 
 def load_circuit():
     d = np.load(CIRCUIT)
@@ -90,20 +100,28 @@ def load_circuit():
 
 
 class LoomingFilter:
-    """raw pot (0..1023) -> looming stimulus (0..1), robust to noise.
+    """raw sensor (0..1023) -> looming stimulus (0..1), robust to noise.
 
-    Median-3 + dead band on the speed. Only the RISE counts (looming =
-    approach); noise and slow turning are ignored.
+    Median filter + dead band on the speed. `direction` says which way the
+    reading moves when something approaches:
+      +1 = rising  (LDR: the flashlight arrives; pot: the knob turns up)
+      -1 = falling (LDR: a hand casts a shadow)
+    `dead` is the dead band in counts/s (sensor-specific). Noise and slow
+    changes are ignored.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, direction: float = 1.0, level_w: float = LEVEL_W,
+                 dead: float = V_DEAD) -> None:
+        self.direction = direction
+        self.level_w = level_w
+        self.dead = dead
         self.buf: list = []
         self.prev = None
         self.v = 0.0
 
-    def update(self, pot: float, dt_s: float) -> float:
+    def update(self, value: float, dt_s: float) -> float:
         # 1) median of the last POT_MEDIAN samples (kills isolated spikes)
-        self.buf.append(pot)
+        self.buf.append(value)
         if len(self.buf) > POT_MEDIAN:
             self.buf.pop(0)
         p = sorted(self.buf)[len(self.buf) // 2]
@@ -112,11 +130,11 @@ class LoomingFilter:
         v = (p - self.prev) / dt_s if (self.prev is not None and dt_s > 0) else 0.0
         self.prev = p
 
-        # 3) dead band: ignores noise and slow turning
-        self.v = max(0.0, v - V_DEAD)
+        # 3) keep only the "approach" direction, then apply the dead band
+        self.v = max(0.0, self.direction * v - self.dead)
 
         # 4) stimulus
-        level = LEVEL_W * (p / POT_MAX)
+        level = self.level_w * (p / POT_MAX)
         return float(np.clip(level + V_TO_STIM * self.v, 0.0, 1.0))
 
 
@@ -307,7 +325,7 @@ def send(ser, sensory: int, inter: int, motor: int, angle: int) -> None:
         print("  !! write hung (did the board reset?)")
 
 
-def port_loop(port: str, baud: int, seconds: float) -> int:
+def port_loop(port: str, baud: int, seconds: float, sensor: str = "pot") -> int:
     if serial is None:
         print("error: pyserial not installed (pip install pyserial)")
         return 1
@@ -317,6 +335,8 @@ def port_loop(port: str, baud: int, seconds: float) -> int:
     sens = roles == "sensory"
     inter = roles == "inter"
     motor = roles == "motor"
+    sensor_cfg = SENSORS[sensor]
+    field = sensor_cfg["field"]
 
     print(f"opening {port} @ {baud} ...")
     try:
@@ -325,7 +345,8 @@ def port_loop(port: str, baud: int, seconds: float) -> int:
         print(f"error: could not open {port}: {exc}")
         return 1
     buf = b""
-    filt = LoomingFilter()
+    filt = LoomingFilter(direction=sensor_cfg["direction"],
+                         level_w=sensor_cfg["level_w"], dead=sensor_cfg["dead"])
     fly = FlightBehavior()
     motor_total = 0
     last_status = 0.0
@@ -356,7 +377,7 @@ def port_loop(port: str, baud: int, seconds: float) -> int:
 
             # use ONLY the last S sample of the batch (discard the late ones):
             # keeps the loop in real time and avoids dt ~ 0 between samples.
-            pot = None
+            raw = None
             while b"\n" in buf:
                 line, buf = buf.split(b"\n", 1)
                 line = line.strip()
@@ -364,11 +385,11 @@ def port_loop(port: str, baud: int, seconds: float) -> int:
                     parts = line.split()
                     if len(parts) == 5:
                         try:
-                            pot = float(parts[3])
+                            raw = float(parts[field])
                         except ValueError:
                             pass
 
-            if pot is None:
+            if raw is None:
                 time.sleep(0.005)
                 continue
 
@@ -378,7 +399,7 @@ def port_loop(port: str, baud: int, seconds: float) -> int:
             # giant false looming (a bug that made the servo throb in series).
             # refractory period: after an escape, it ignores the pot -- breaks
             # the noise -> firing -> servo -> noise cycle.
-            stim = filt.update(pot, CHUNK_MS / 1000.0)
+            stim = filt.update(raw, CHUNK_MS / 1000.0)
             if fly.busy(now):
                 stim = 0.0  # flying/landing: does not heed the pot (and avoids noise)
 
@@ -400,7 +421,7 @@ def port_loop(port: str, baud: int, seconds: float) -> int:
             if now - last_status >= 0.5:
                 last_status = now
                 print(
-                    f"  pot={int(pot):4d} stim={stim:4.2f} "
+                    f"  {sensor}={int(raw):4d} stim={stim:4.2f} "
                     f"motor={'1' if mspikes else '0'} "
                     f"flight={'1' if fly.flying else '0'} ang={angle:3d} "
                     f"flight#{fly.episodes} sim={sim_s:5.1f}s wall={now - t0:5.1f}s"
@@ -427,6 +448,8 @@ def main() -> int:
     ap.add_argument("--fake", action="store_true", help="control loop without serial")
     ap.add_argument("--port", help="serial port, e.g. /dev/ttyACM0")
     ap.add_argument("--baud", type=int, default=115200)
+    ap.add_argument("--sensor", choices=["pot", "ldr"], default="pot",
+                    help="what drives the looming stimulus (default: pot)")
     ap.add_argument("--stim", type=float, default=0.2, help="0..1 (dry-run)")
     ap.add_argument("--seconds", type=float, default=3.0,
                     help="duration; <=0 on --port runs until Ctrl-C")
@@ -437,7 +460,7 @@ def main() -> int:
     if args.fake:
         return fake(args.seconds)
     if args.port:
-        return port_loop(args.port, args.baud, args.seconds)
+        return port_loop(args.port, args.baud, args.seconds, args.sensor)
     ap.error("choose --dry-run, --fake or --port")
 
 

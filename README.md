@@ -68,6 +68,20 @@ The servo does not blink: it **flies**. `brain/run_brain.py` has a state machine
    variation. A stronger startle ⇒ a longer flight.
 4. **Lands** and stops. Only a **new** startle makes it fly again.
 
+### Two ways to startle it
+
+`--sensor` picks what drives the looming stimulus:
+
+- **`--sensor pot`** (default) — the potentiometer on **A2**. *Approaching* = a sharp
+  counter-clockwise turn.
+- **`--sensor ldr`** — the light sensor on **A0**. *Approaching* = a sudden rise in light:
+  keep the room dark (LDR ≈ 50) and arrive with a flashlight. The light is the "predator" and
+  the fly bolts. (You can invert the staging — lit at rest, a hand casts a shadow — by flipping
+  the LDR `direction` to `-1` in `SENSORS`.)
+
+Both share the same filtering: a median filter to kill spikes, a dead band so that noise and
+slow changes are ignored, and a refractory period after each escape.
+
 ## Hardware
 
 Eletrogate "Kit Start" kit (Arduino UNO R3):
@@ -78,8 +92,8 @@ Eletrogate "Kit Start" kit (Arduino UNO R3):
 | Red LED | 5 | **sensory** stage (LC4/LPLC2) |
 | Yellow LED | 6 | **interneuron** |
 | Green LED | 7 | **motor** (Giant Fiber) |
-| Potentiometer 10 kΩ | A2 | *looming* (the startle) |
-| LDR | A0 | *(optional)* light |
+| Potentiometer 10 kΩ | A2 | *looming* — the startle (`--sensor pot`) |
+| LDR (light) | A0 | *looming* — a flashlight arriving (`--sensor ldr`) |
 | NTC 10 kΩ | A1 | *(optional)* temperature |
 | Button | 2 | *(optional)* |
 | Buzzer | 8 | *(optional)* |
@@ -91,7 +105,8 @@ Assembly and wiring details are in the header of `board/flywire/flywire.ino`.
 The servo injects noise into the rails when it moves, and that shows up in the pot reading. Two
 capacitors help:
 
-- **100 nF** (ceramic) between **A2 and GND** — filters high-frequency noise at the input.
+- **100 nF** (ceramic) between the analog input (**A2** for the pot, or **A0** for the LDR) and
+  **GND** — filters high-frequency noise at the input.
 - **100 µF** (electrolytic, mind the polarity) between **5 V and GND** near the servo — current
   reserve for the peaks.
 
@@ -143,8 +158,11 @@ On boot it runs a self-test: sweeps the servo, lights the LEDs in sequence, beep
 .venv/bin/python brain/run_brain.py --dry-run --stim 0.2 --seconds 1
 .venv/bin/python brain/run_brain.py --fake --seconds 14
 
-# real loop: turn the pot slowly (nothing) and then give it a sharp twist (it flies)
+# real loop, potentiometer: a sharp twist startles it
 cd brain && sg dialout -c '../.venv/bin/python -u run_brain.py --port /dev/ttyACM0 --seconds 0'
+
+# real loop, light sensor: keep the room dark, arrive with a flashlight
+cd brain && sg dialout -c '../.venv/bin/python -u run_brain.py --port /dev/ttyACM0 --sensor ldr --seconds 0'
 ```
 
 `--seconds 0` runs until you press Ctrl-C.
