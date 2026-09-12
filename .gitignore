@@ -13,5 +13,8 @@ brain/data/*.csv.gz
 brain/data/*.feather
 brain/data/*.npy
 
+# generated experiment outputs
+experiments/results/
+
 # system
 .DS_Store

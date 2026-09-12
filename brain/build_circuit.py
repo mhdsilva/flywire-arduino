@@ -18,6 +18,7 @@ Sign: GABA -> inhibitory (negative weight), everything else -> excitatory (posit
 Output: brain/data/circuit.npz
   node_ids (int64)      : root_id of each neuron (index = position)
   roles    (<U8)        : "sensory" | "motor" | "inter"
+  node_types (<U*)      : FlyWire primary_type string per node (same ordering)
   rows (int32)          : postsynaptic index (row)
   cols (int32)          : presynaptic index (column)
   data (float32)        : weight W
@@ -128,6 +129,13 @@ def main() -> int:
         dtype="<U8",
     )
 
+    # Primary cell type per node (from FlyWire consolidated_cell_types), kept in
+    # the npz so experiments can target e.g. LC4 vs LPLC2 without the gitignored
+    # CSV at run time. The widest type string sets the fixed-width dtype.
+    node_types_list = [type_of.get(int(r), "") for r in node_ids]
+    max_type_len = max([len(t) for t in node_types_list] + [1])
+    node_types = np.array(node_types_list, dtype=f"<U{max_type_len}")
+
     n_sensory = int((roles == "sensory").sum())
     n_motor = int((roles == "motor").sum())
     n_inter = int((roles == "inter").sum())
@@ -139,7 +147,8 @@ def main() -> int:
 
     out = os.path.join(DATA, "circuit.npz")
     np.savez_compressed(
-        out, node_ids=node_ids, roles=roles, rows=rows, cols=cols, data=data
+        out, node_ids=node_ids, roles=roles, node_types=node_types,
+        rows=rows, cols=cols, data=data
     )
     print(f"saved to {out}")
     return 0
