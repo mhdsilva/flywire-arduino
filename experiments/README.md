@@ -2,7 +2,17 @@
 
 Implementation of the experimental design in [`docs/EXPERIMENTS.md`](../docs/EXPERIMENTS.md).
 The design document is the spec: it fixes the protocol, metrics and interpretation.
-This file documents how the code implements them and what the results mean.
+This file documents how the code implements them; the results live in
+[`FINDINGS.md`](FINDINGS.md).
+
+## Documentation map
+
+| file | role |
+|---|---|
+| [`docs/EXPERIMENTS.md`](../docs/EXPERIMENTS.md) | **the design** — protocol, metrics, interpretation rules. Written before the code; the spec |
+| `README.md` (this file) | **how to run** — commands, protocol implementation, semantics, timings |
+| [`FINDINGS.md`](FINDINGS.md) | **what came out** — results, honest reading, caveats, article angles, open questions |
+| `results/*.csv` | raw per-run output (gitignored); `FINDINGS.md` quotes them |
 
 All runners import `experiments/harness.py`, which is the single implementation of
 the shared protocol. If the protocol changes, it changes there once.

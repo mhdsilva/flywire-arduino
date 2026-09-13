@@ -17,6 +17,7 @@ Reproduce (wall times measured on the i5-1135G7 laptop, 2026-09-12):
 .venv/bin/python experiments/dose_response.py --trials 20 --noise-sigma 0.05   # ~162 s
 .venv/bin/python experiments/dose_response.py --points 16 --amp-max 0.3 \
     --trials 20 --noise-sigma 0.5                                         # ~304 s
+.venv/bin/python experiments/latency.py                                   # ~9 s, needs the board
 ```
 
 ---
@@ -358,6 +359,10 @@ Each of these is a separate, self-contained story:
 5. **"Write the design before the code."** The methodology story: the design document
    named the trap before any result existed, which is the only reason the false
    claim in (1) never got written.
+6. **"Your brain is fast, your servo is slow."** The measured loop budget (§7): the
+   actuator is ~85% of it, the connectome step ~12%, USB ~3%. The part that was hard
+   to build is not the part that sets the machine's floor — and the laptop's compute
+   is not free either (16 ms of a 20 ms cadence).
 
 ## Open questions
 
