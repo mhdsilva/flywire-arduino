@@ -150,6 +150,36 @@ than the default 9-point grid; use `--points`/`--amp-max` to zoom in.
     --trials 20 --noise-sigma 0.5                                              # ~304 s
 ```
 
+### 4. Latency — `latency.py`
+
+Measures the **hardware loop** on the real board, keeping it separate from the
+in-silico neural latency. It needs the `P` ping command in the Uno firmware
+(`board/flywire/flywire.ino`), which replies immediately with `P <micros()>`:
+
+```bash
+PATH="$PWD/bin:$PATH" arduino-cli compile --fqbn arduino:avr:uno board/flywire
+sg dialout -c 'PATH="$PWD/bin:$PATH" arduino-cli upload --fqbn arduino:avr:uno -p /dev/ttyACM0 board/flywire'
+```
+
+Then:
+
+```bash
+sg dialout -c '.venv/bin/python experiments/latency.py'   # ~9 s, board at /dev/ttyACM0
+```
+
+Five stages, each printed with its raw distribution: serial round trip (`P`
+ping), `S`-line inter-arrival jitter, host per-iteration cost (`read S -> 20 ms
+network chunk -> write L`), in-silico `first_spike_ms`, and a derived
+servo-slew estimate. The budget table labels every stage `measured` or
+`derived`. Raw samples go to `results/latency.csv` with columns
+`kind,index,value_ms` (`kind` is `ping_rtt` or `s_interval`).
+
+The runner works with `--port`/`--baud` and `--pings`/`--s-samples`/
+`--loop-iters`/`--amp`. Without a board (or without the `P` command) it prints
+the in-silico number, says what could not be measured, and exits cleanly — it
+never invents a timing. Measured wall time on the 2026-09-12 bench: **8.8 s**
+for the default run (allow ~12 s on a cold USB start).
+
 ### Harness self-test
 
 ```
@@ -173,8 +203,9 @@ curve whose threshold moves with the injected noise.
 **Does:** quantify the response of this specific 583-neuron subcircuit (sensory
 314, inter 267, motor 2; LC4 104, LPLC2 210, DNp01 2) to controlled in-silico
 stimuli, test whether the specific topology carries information beyond its
-degree sequence, and show what an explicitly injected stochastic drive does to
-the response threshold.
+degree sequence, show what an explicitly injected stochastic drive does to the
+response threshold, and measure the physical Arduino loop latency on the bench
+(§4), where the actuator — not the connectome — dominates.
 
 **Does not:** demonstrate biological realism. The neuron model is LIF, synapses
 are static, transmitters are collapsed to a sign, this is a small subcircuit and

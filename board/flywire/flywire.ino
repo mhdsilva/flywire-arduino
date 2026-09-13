@@ -45,6 +45,10 @@
  *      L <sensory> <inter> <motor> <angle>   0/1, 0/1, 0/1, 0..180
  *      B <freq>                              0 turns the buzzer off
  *      T                                     runs the self-test again
+ *      P                                     replies immediately with
+ *                                            "P <micros()>\n" (the Arduino's
+ *                                            own microsecond clock); used to
+ *                                            measure the serial round trip
  */
 
 #include <Servo.h>
@@ -162,5 +166,8 @@ void process(char *line) {
     }
   } else if (line[0] == 'T' || line[0] == 't') {
     selfTest();
+  } else if (line[0] == 'P' || line[0] == 'p') {
+    Serial.print("P ");
+    Serial.println(micros());
   }
 }

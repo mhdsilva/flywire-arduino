@@ -227,6 +227,81 @@ removing any *individual* interneuron type does nothing (or very slightly lowers
 it). The aggregate inhibition is distributed across many small types, not
 concentrated in one.
 
+## 7. Hardware loop latency: the actuator is the bottleneck
+
+This is the only section measured on the physical bench: an Arduino UNO at
+`/dev/ttyACM0` running the firmware with the new `P` ping command. Reproduce
+with `sg dialout -c '.venv/bin/python experiments/latency.py'` (~9 s). Raw
+samples are in `results/latency.csv`.
+
+### The two latencies are different numbers
+
+| latency | value | source |
+|---|---:|---|
+| in-silico: pulse onset → first DNp01 spike (amp = 0.2) | **32.4 ms** | measured (`harness.run_trial`) |
+| real animal Giant Fiber | **~4 ms** | literature — *not measured here* |
+
+The first is *simulated* time; the hardware loop is *wall-clock*. They are not
+the same number and must not be quoted as one.
+
+### The hardware budget
+
+| stage | value (ms) | measured / derived |
+|---|---:|---|
+| sensor sample wait (0–20 ms, uniform at 50 Hz) | 0.000 – 20.000 | derived (cadence) |
+| USB/serial each way (×2) | 2.036 each | derived from measured ping (round trip 4.072 ms) |
+| host brain step (`read S` → 20 ms chunk → `write L`) | 16.319 | measured |
+| Uno → servo | ~0 | derived (negligible) |
+| servo mechanical, 50° at 450°/s | 111.111 | derived (command slew limit) |
+| **total loop** | **131.50 – 151.50** | sum (the 0–20 ms sensor wait is the range) |
+
+Measured distributions behind the table:
+
+- **Serial round trip (`P` ping, N = 100):** min 3.203, mean 4.072, sd 0.198,
+  p95 4.334, max 4.850 ms. Host → Uno → host over USB, including the Uno's loop
+  latency. The first ping after boot was discarded: the board can still be
+  finishing its self-test then (a ~250 ms outlier when it was not discarded).
+- **`S` inter-arrival (149 intervals):** min 16.283, mean 20.012, sd 1.251,
+  p95 20.628, max 20.915 ms. The firmware targets 50 Hz; the sub-20 ms minimum
+  and the jitter are arrival effects at the host (USB batching / scheduling), not
+  a change to the Uno's sample instant.
+- **Host per iteration (100 iterations):** min 13.544, mean 16.319, sd 1.826,
+  p95 19.434, max 20.591 ms. The brain step is ~82% of its 20 ms cadence and its
+  tail occasionally overshoots the cadence. Run-to-run it varied 15.7–16.3 ms
+  across three bench runs, so treat it as "about 16 ms", not a constant.
+
+### Reading
+
+**The connectome is not the physical bottleneck; the actuator is.** The servo's
+50° move — 111.1 ms *derived from the command slew limit alone* — is by far the
+largest stage: about **85% of the fixed part of the loop**. The host brain step
+(16.3 ms measured) is roughly an eighth, and the entire USB round trip (4.1 ms
+measured) is about 3%. The in-silico reaction (32.4 ms) is real work the loop
+must carry, but it is still about a third of the commanded servo move, and it is
+simulated milliseconds; the physical servo is the wall-clock stage that sets the
+loop's floor.
+
+So §4's design warning is confirmed: the two latencies are different numbers,
+and the one people tend to quote (the connectome's) is not the one that
+dominates the machine. The secondary finding is that the laptop's compute is not
+free either: at ~16 ms mean per 20 ms chunk it has little headroom, and its
+tail crosses the cadence.
+
+### Caveats
+
+- **USB is host-dependent.** The ping measures this laptop + cable + hub; a
+  different host differs. N = 100 is small; one boot ping was discarded.
+- **The servo number is derived, not measured.** `SERVO_SPEED_DPS = 450` is the
+  *command* slew limit. The real SG90 has its own dynamics (start-up, inertia,
+  deadband, load), so 111 ms for 50° is the commanded time, not a measured blade
+  arrival — a lower bound.
+- **`Uno → servo` is asserted negligible**, not separately timed: the servo write
+  happens in the same `loop()` turn as the `L` command.
+- **The `S` interval is arrival at the host**, so it includes USB and the host's
+  read scheduling, not only the Uno's 20 ms timer.
+- **~4 ms Giant Fiber latency is a literature reference** for the animal; it was
+  not measured in this repo.
+
 ---
 
 ## What this does and does not show
@@ -238,8 +313,10 @@ the threshold.
 
 **Does not:** demonstrate biology. LIF neurons, static synapses, a sign-collapsed
 view of neurotransmitters, one subcircuit out of a brain, and an engineered
-servo/flight readout outside these experiments. The experiments are in-silico; no
-hardware was involved in producing any number above.
+servo/flight readout outside these experiments. Sections 1–6 are in-silico; no
+hardware was involved in producing their numbers. Section 7 is the exception:
+it is measured on the physical Arduino UNO, with the servo stage *derived* from
+the command slew limit rather than measured.
 
 **New caveats for the injected noise (§5).** The noise is an external stimulus we
 chose, not a property of the model: the neuron model is deterministic and was not
@@ -292,5 +369,7 @@ Each of these is a separate, self-contained story:
 - The injected-noise threshold moves with `σ` as expected. Is there a principled
   way to choose `σ` (e.g. fit it to a measured trigger-variance), or is any such
   fit circular because the model's only variability is the one we added?
-- **Hardware latency** (§4 of the design): the in-silico numbers above say nothing
-  about the physical loop, which adds serial and servo time.
+- **Hardware latency** is now measured (§7): the actuator dominates the loop.
+  Still not measured: the SG90's actual slew under load, and the sensor-to-spike
+  delay of the physical plant (what the LDR/pot really does before the host sees
+  it). The servo 111 ms is a derived command-slew estimate, not a bench reading.
