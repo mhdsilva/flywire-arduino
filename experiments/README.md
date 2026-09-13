@@ -124,73 +124,14 @@ per trial). Prints trigger probability, mean `motor_spikes` and mean
 .venv/bin/python experiments/harness.py --amp 0.2   # ~1.4 s
 ```
 
-## Results (2026-09-12, saved circuit, seed 0)
+## Results
 
-Reproduced with the commands above. These are the values in `results/*.csv`.
-
-### Ablation — across amplitudes
-
-```
-condition  removed      0.20        0.35        0.50        0.75        1.00
-baseline         0    6 (100%)   14 (100%)   20 (100%)   27 (100%)   32 (100%)
-LC4            104    0 (  0%)    4 ( 29%)    8 ( 40%)   13 ( 48%)   17 ( 53%)
-LPLC2          210    0 (  0%)    4 ( 29%)    8 ( 40%)   12 ( 44%)   16 ( 50%)
-sensory        314    0 (  0%)    0 (  0%)    0 (  0%)    0 (  0%)    0 (  0%)
-inter          267    7 (117%)   16 (114%)   23 (115%)   29 (107%)   33 (103%)
-motor            2    0 (  0%)    0 (  0%)    0 (  0%)    0 (  0%)    0 (  0%)
-```
-
-- **LC4 and LPLC2 are symmetric: each carries roughly half the drive.** Neither is
-  individually necessary — but at `amp = 0.2`, just above threshold, losing either
-  one abolishes the response entirely. **That is exactly why the sweep exists:** a
-  single near-threshold run would have read as "both are individually necessary".
-- **The interneurons are net-inhibitory here.** Removing all 267 raises the output
-  by 3-17% at every amplitude — consistent across the sweep, not a threshold effect.
-- `sensory` (removing the whole input) and `motor` (removing the readout) give zero
-  by construction — the two sanity checks.
-
-### Null model
-
-```
-real circuit: motor_spikes 6, first_spike_ms 32.4 ms
-degree preservation: max |out-deg diff| = 0   max |in-deg diff| = 0
-
-degree-preserving null (n=20): motor_spikes mean 1.70 sd 1.82 -> real 6 = 100th percentile
-                               first_spike_ms mean 35.9 ms -> real 32.4 = 20th percentile (10/20 fired)
-
-Erdos-Renyi null (n=20):       motor_spikes mean 0.00 -> real 6 = 100th percentile (0/20 fired)
-```
-
-At the default `--n 50` the real circuit sits at the **99th percentile** of the
-degree-preserving null (mean 1.74, sd 1.78), latency at the 16th (29/50 fired), and
-the Erdős–Rényi null still never fires (0/50).
-
-- **The specific topology matters.** The real circuit emits several times more motor
-  spikes than degree-matched random wiring, and a random same-density graph never
-  fires at all. The wiring carries information beyond its degree sequence.
-- The latency effect is smaller and noisier than the spike-count effect (many nulls
-  never fire, so their latency is undefined), so the spike count is the honest
-  headline.
-- `n = 20` is a small sample; the percentile has wide error bars. The default is 50.
-
-### Dose–response
-
-```
-   amp  trigger_p  mean_spikes  mean_first_ms
- 0.000       0.00         0.00              -
- 0.125       1.00         1.00          76.40
- 0.250       1.00         9.00          23.70
- 0.375       1.00        16.00          15.10
- 0.500       1.00        20.00          11.60
- 0.625       1.00        25.00           9.70
- 0.750       1.00        27.00           8.60
- 0.875       1.00        30.00           7.80
- 1.000       1.00        32.00           7.30
-```
-
-The trigger is a **sharp step** (see the determinism note above): the graded
-information is in the spike count and the latency, which falls from ~76 ms just
-above threshold to ~7 ms at saturation.
+The results, their interpretation, the caveats and the article angles live in
+[`FINDINGS.md`](FINDINGS.md), so this file stays about *how* to run the
+experiments. Headline: across the amplitude sweep, LC4 and LPLC2 each carry about
+half the drive (neither is individually necessary), the interneurons are
+net-inhibitory, and the real circuit sits at the 99th–100th percentile of a
+degree-preserving null.
 
 ## What this does and does not show
 

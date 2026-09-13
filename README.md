@@ -221,15 +221,19 @@ Worth recording, because it was the most interesting part:
 
 ## Experiments
 
-The bench demo can be turned into measurements. [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md)
-is the experimental design (not yet implemented): a shared stimulus protocol, honest
-metrics, and four experiments — **ablation** (which neurons are necessary), **null
-model** (does the specific wiring matter, or would any graph with the same degree
-sequence do?), **dose–response** (how sharp the threshold is) and **latency**
-(in-silico vs the hardware loop).
+The bench demo is also a bench for measurements. [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md)
+fixes the design — a shared stimulus protocol, honest metrics, and four experiments:
+**ablation** (which neurons are necessary), **null model** (does the specific wiring
+matter, or would any graph with the same degree sequence do?), **dose–response** (how
+sharp the threshold is) and **latency** (in-silico vs the hardware loop).
 
-The design is written down before the code, so the experiments cannot be tuned into
-telling a nicer story afterwards.
+The design was written before the code, so the experiments cannot be tuned into
+telling a nicer story afterwards — and it paid off: at a single near-threshold
+stimulus the ablation looked like "LC4 and LPLC2 are each individually necessary",
+which the amplitude sweep showed to be an artefact.
+
+Results and the honest reading: [`experiments/FINDINGS.md`](experiments/FINDINGS.md).
+The code and commands: [`experiments/README.md`](experiments/README.md).
 
 ## What is real and what is simplified
 
