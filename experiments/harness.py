@@ -18,12 +18,20 @@ Integration step is ``DT = 0.1 ms`` (the repo default), driven through
 ``run_brain.step_ms``. Motor spikes are counted over the pulse + readout window;
 the warm-up is never part of any metric.
 
-Determinism
------------
-The LIF model contains no stochastic term. ``seed`` is accepted by every runner
-for protocol/reproducibility compliance, but it does not change a trial: the
-same ``amp`` gives bit-identical metrics for every seed. This is documented
-rather than patched over -- no noise is invented to manufacture variance.
+Determinism and injected noise
+------------------------------
+The LIF model in ``brain/lif.py`` contains no stochastic term and is left
+completely unchanged. With the default ``noise_sigma=0.0`` the protocol is
+deterministic: ``seed`` is accepted for protocol/reproducibility compliance but
+the same ``amp`` gives bit-identical metrics for every seed. No noise is
+invented to manufacture variance.
+
+When ``noise_sigma > 0`` an *explicitly injected* stochastic drive is added to
+the external current of the sensory neurons at every integration step of the
+pulse and readout windows (never the warm-up). A per-trial RNG seeded from
+``seed`` makes the run reproducible. This injected stimulus is the ONLY source
+of stochasticity; the neuron model, the synapses and the readout are unchanged.
+It is an injected drive, not a claim that the brain is noisy.
 """
 
 from __future__ import annotations
@@ -79,7 +87,8 @@ def load_circuit():
     return _CIRCUIT
 
 
-def run_trial(amp, pulse_ms=100.0, ablate=None, weights=None, seed=0):
+def run_trial(amp, pulse_ms=100.0, ablate=None, weights=None, seed=0,
+              noise_sigma=0.0):
     """Run one protocol trial and return the metric dict.
 
     Parameters
@@ -95,8 +104,14 @@ def run_trial(amp, pulse_ms=100.0, ablate=None, weights=None, seed=0):
         Custom raw-weight matrix (used by the null model). ``None`` = the real
         circuit. It is scaled by ``WEIGHT_SCALE`` exactly like the real one.
     seed : int
-        Protocol seed. Present for reproducibility; the model is deterministic,
-        so it does not alter the result.
+        Seed for the injected noise. With ``noise_sigma == 0.0`` the model is
+        deterministic and the seed does not alter the result.
+    noise_sigma : float
+        Standard deviation of Gaussian noise added to the sensory external
+        current at each integration step of the pulse and readout windows (in
+        the same units as ``STIM_GAIN``). ``0.0`` disables it and reproduces the
+        deterministic protocol exactly. This injected drive is the only source
+        of stochasticity; the neuron model is unchanged.
 
     Ablation semantics -- remove, not silence
     -----------------------------------------
@@ -123,10 +138,10 @@ def run_trial(amp, pulse_ms=100.0, ablate=None, weights=None, seed=0):
         D = sp.diags(keep)
         base = (D @ base @ D).tocsr()
 
-    # The LIF model has no stochastic term, so no RNG is drawn here. ``seed`` is
-    # accepted for protocol compliance but leaves the dynamics bit-identical;
-    # we deliberately do not invent noise to manufacture trial variance.
-    _ = seed
+    # Injected-noise RNG. With noise_sigma == 0.0 it is never drawn from, so
+    # the deterministic protocol is bit-identical to before. With noise > 0 the
+    # same seed reproduces the same trial exactly.
+    rng = np.random.default_rng(seed) if noise_sigma > 0.0 else None
 
     net = LIF(base, roles, weight_scale=WEIGHT_SCALE, dt=DT)
     net.reset()
@@ -140,8 +155,11 @@ def run_trial(amp, pulse_ms=100.0, ablate=None, weights=None, seed=0):
         sensory[idx] = False
         motor[idx] = False
     n_motor = int(motor.sum())
+    n_sensory = int(sensory.sum())
 
     # 1) warm-up, no stimulus. step_ms with ext=None is the repo convention.
+    # Noise is deliberately excluded from the warm-up: a trial must start from
+    # the same settled state, and the stimulus is what drives the response.
     step_ms(net, None, WARMUP_MS)
 
     # 2) pulse + 3) readout. Stepped one DT at a time so motor spikes can be
@@ -152,7 +170,15 @@ def run_trial(amp, pulse_ms=100.0, ablate=None, weights=None, seed=0):
     pulse_steps = int(round(pulse_ms / DT))
     motor_counts = np.zeros(total_steps, dtype=np.int64)
     for k in range(total_steps):
-        ext = stim if k < pulse_steps else None
+        if noise_sigma > 0.0:
+            # Injected stochastic drive to the sensory neurons only: the
+            # stimulus during the pulse, ongoing noisy drive during the readout.
+            # The neuron model and synapses are untouched -- this is the sole
+            # source of trial-to-trial variability.
+            ext = stim.copy() if k < pulse_steps else np.zeros(n, dtype=np.float64)
+            ext[sensory] += rng.normal(0.0, noise_sigma, size=n_sensory)
+        else:
+            ext = stim if k < pulse_steps else None
         counts = step_ms(net, ext, DT)
         if n_motor:
             motor_counts[k] = counts[motor].sum()
@@ -198,10 +224,14 @@ def main(argv=None):
                     help=f"pulse amplitude in STIM_GAIN units (default {DEFAULT_AMP})")
     ap.add_argument("--pulse-ms", type=float, default=100.0)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--noise-sigma", type=float, default=0.0,
+                    help="sd of injected Gaussian sensory drive (0 = deterministic)")
     args = ap.parse_args(argv)
 
-    m = run_trial(args.amp, pulse_ms=args.pulse_ms, seed=args.seed)
-    print(f"amp={args.amp}  pulse_ms={args.pulse_ms}  seed={args.seed}")
+    m = run_trial(args.amp, pulse_ms=args.pulse_ms, seed=args.seed,
+                  noise_sigma=args.noise_sigma)
+    print(f"amp={args.amp}  pulse_ms={args.pulse_ms}  seed={args.seed}  "
+          f"noise_sigma={args.noise_sigma}")
     print(f"  motor_spikes     {m['motor_spikes']}")
     print(f"  first_spike_ms   {m['first_spike_ms']}")
     print(f"  peak_rate_hz     {m['peak_rate_hz']:.2f}")

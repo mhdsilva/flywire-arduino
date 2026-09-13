@@ -9,7 +9,7 @@ the shared protocol. If the protocol changes, it changes there once.
 
 ## Shared protocol
 
-`harness.run_trial(amp, pulse_ms=100.0, ablate=None, weights=None, seed=0)`:
+`harness.run_trial(amp, pulse_ms=100.0, ablate=None, weights=None, seed=0, noise_sigma=0.0)`:
 
 1. **Reset** (`LIF.reset()`).
 2. **Warm-up:** 200 ms, no stimulus.
@@ -20,7 +20,8 @@ the shared protocol. If the protocol changes, it changes there once.
 Integration uses the repo constants `DT = 0.1 ms`, `WEIGHT_SCALE = 3e-4`,
 `STIM_GAIN = 0.5` and `run_brain.step_ms`. Motor spikes are counted over the
 pulse + readout window (600 ms); the warm-up never enters a metric. `ablate` and
-`weights` are the modification hooks (see below).
+`weights` are the modification hooks (see below), and `noise_sigma` is the
+injected-noise hook.
 
 ### Baseline amplitude
 
@@ -31,17 +32,28 @@ without saturating — there is headroom toward `amp = 1`. The repo's earlier
 continuous-stimulus measurement (0.2 fires, 0.1 does not) is consistent with
 this.
 
-### Determinism and seeds — read this
+### Determinism and injected noise — read this
 
-The LIF model in `brain/lif.py` has **no stochastic term**. `seed` is accepted by
-every runner for protocol compliance, but it does not change a trial: the same
-`amp` gives bit-identical metrics for every seed. No noise has been invented to
-manufacture trial-to-trial variance.
+The LIF model in `brain/lif.py` has **no stochastic term** and was not modified.
+With the default `noise_sigma=0.0`, `seed` is accepted for protocol compliance
+but does not change a trial: the same `amp` gives bit-identical metrics for every
+seed. No noise has been invented to manufacture trial-to-trial variance.
 
-Consequence: in the dose–response, all `--trials` repeats at one amplitude are
-identical, so `trigger_probability` is exactly 0 or 1 and the reported threshold
-is a sharp step. That is the honest result for this model, not a missing feature.
-The meaningful curve is the spike count / latency vs amplitude, which is graded.
+Passing `noise_sigma > 0` adds an **explicitly injected** stochastic drive to the
+external current of the sensory neurons at every integration step of the pulse
+and readout windows (never the warm-up). A per-trial RNG seeded from `seed` makes
+the run reproducible: the same seed reproduces a trial exactly, a different seed
+gives a different draw. This injected stimulus is the only source of
+stochasticity; the neuron model, synapses and readout are unchanged. `noise_sigma`
+is in the same units as `STIM_GAIN` (external current; threshold = 1.0), and the
+psychometric threshold location is a function of it.
+
+Consequence for the dose–response: with `noise_sigma=0.0`, all `--trials` repeats
+at one amplitude are identical, so `trigger_probability` is exactly 0 or 1 and the
+reported threshold is a sharp step — the honest result for this model. With noise
+the repeat becomes a draw, so `trigger_probability` can be graded; the graded
+window is narrow at small `σ` because the membrane/synapse low-pass filters white
+noise. See [`FINDINGS.md`](FINDINGS.md) §5.
 
 ## Metrics
 
@@ -65,7 +77,7 @@ membrane clamp, which would leave the synapses in place. Cell types come from th
 
 ### 1. Ablation — `ablation.py`
 
-Conditions: `baseline`, `LC4`, `LPLC2`, `sensory`, `inter`, `motor`.
+Default conditions: `baseline`, `LC4`, `LPLC2`, `sensory`, `inter`, `motor`.
 
 **The amplitude sweep is the point.** Every condition runs across several stimulus
 amplitudes (`--amps`, default `0.2 0.35 0.5 0.75 1.0`) and each cell is
@@ -74,12 +86,21 @@ abolish the response and look "necessary"; only at suprathreshold amplitudes doe
 the group's real contribution appear. A single amplitude would hide that — and
 would have supported a false claim.
 
+With `--types`, the runner profiles the whole cell-type inventory instead: it
+ablates **every** non-empty FlyWire `primary_type` with at least `--min-cells`
+neurons (default 10), plus the baseline. At the default threshold only LC4 and
+LPLC2 qualify; lower it to inspect the long tail (all other types are 1–8-cell
+interneurons, so `--min-cells 1` covers everything).
+
 ```
-.venv/bin/python experiments/ablation.py             # sweep, ~14 s on i5-1135G7
-.venv/bin/python experiments/ablation.py --amp 0.5   # a single amplitude
+.venv/bin/python experiments/ablation.py                              # ~20 s
+.venv/bin/python experiments/ablation.py --amp 0.5                    # a single amplitude
+.venv/bin/python experiments/ablation.py --types                      # default --min-cells 10
+.venv/bin/python experiments/ablation.py --types --min-cells 1        # whole inventory, ~432 s
 ```
 
-Writes `results/ablation.csv` (one row per amplitude x condition).
+Default mode writes `results/ablation.csv`; `--types` writes
+`results/ablation_types.csv` (same columns, one row per amplitude x condition).
 
 ### 2. Null model — `null_model.py`
 
@@ -100,6 +121,7 @@ Two nulls, run through the identical protocol:
 ```
 .venv/bin/python experiments/null_model.py --n 20     # ~42 s
 .venv/bin/python experiments/null_model.py            # default --n 50, ~104 s
+.venv/bin/python experiments/null_model.py --n 100    # ~207 s
 ```
 
 Writes `results/null_model.csv` (one row per sample plus a tagged `real` row) and
@@ -111,17 +133,28 @@ printed.
 ### 3. Dose–response — `dose_response.py`
 
 Sweeps `amp` over `0 .. 1` in `--points` steps with `--trials` repeats (new seed
-per trial). Prints trigger probability, mean `motor_spikes` and mean
-`first_spike_ms`; writes `results/dose_response.csv`.
+per trial). Prints trigger probability, mean ± sd `motor_spikes` and mean
+`first_spike_ms`.
+
+With the default `--noise-sigma 0.0` the run is deterministic and writes
+`results/dose_response.csv` (unchanged format). With `--noise-sigma > 0` the
+sensory external current gets the injected drive described above, the curve can
+be graded, and the run writes `results/dose_response_noise.csv` (with an added
+`sd_motor_spikes` and `noise_sigma` column). The graded window can be narrower
+than the default 9-point grid; use `--points`/`--amp-max` to zoom in.
 
 ```
-.venv/bin/python experiments/dose_response.py --trials 5   # ~33 s
+.venv/bin/python experiments/dose_response.py --trials 20 --noise-sigma 0.0    # ~128 s
+.venv/bin/python experiments/dose_response.py --trials 20 --noise-sigma 0.05   # ~162 s
+.venv/bin/python experiments/dose_response.py --points 16 --amp-max 0.3 \
+    --trials 20 --noise-sigma 0.5                                              # ~304 s
 ```
 
 ### Harness self-test
 
 ```
-.venv/bin/python experiments/harness.py --amp 0.2   # ~1.4 s
+.venv/bin/python experiments/harness.py --amp 0.2                          # ~1.4 s
+.venv/bin/python experiments/harness.py --amp 0.2 --noise-sigma 0.05 --seed 1
 ```
 
 ## Results
@@ -129,21 +162,27 @@ per trial). Prints trigger probability, mean `motor_spikes` and mean
 The results, their interpretation, the caveats and the article angles live in
 [`FINDINGS.md`](FINDINGS.md), so this file stays about *how* to run the
 experiments. Headline: across the amplitude sweep, LC4 and LPLC2 each carry about
-half the drive (neither is individually necessary), the interneurons are
-net-inhibitory, and the real circuit sits at the 99th–100th percentile of a
-degree-preserving null.
+half the drive (neither is individually necessary) and no other cell type carries
+a meaningful share; the interneurons are net-inhibitory in aggregate; the real
+circuit sits at the 99th–100th percentile of a degree-preserving null; and an
+injected stochastic drive turns the deterministic step into a graded psychometric
+curve whose threshold moves with the injected noise.
 
 ## What this does and does not show
 
 **Does:** quantify the response of this specific 583-neuron subcircuit (sensory
 314, inter 267, motor 2; LC4 104, LPLC2 210, DNp01 2) to controlled in-silico
-stimuli, and test whether the specific topology carries information beyond its
-degree sequence.
+stimuli, test whether the specific topology carries information beyond its
+degree sequence, and show what an explicitly injected stochastic drive does to
+the response threshold.
 
 **Does not:** demonstrate biological realism. The neuron model is LIF, synapses
 are static, transmitters are collapsed to a sign, this is a small subcircuit and
-not the whole brain, and the servo/flight readout is an engineered mapping. These
-are honest toys with real wiring.
+not the whole brain, and the servo/flight readout is an engineered mapping. The
+injected noise is a stimulus we chose, not a property of the model or the brain:
+`σ` is arbitrary, unfitted and added only to the sensory external current, so
+the psychometric threshold it produces is conditional on `σ`. These are honest
+toys with real wiring.
 
 ## Pointer
 
